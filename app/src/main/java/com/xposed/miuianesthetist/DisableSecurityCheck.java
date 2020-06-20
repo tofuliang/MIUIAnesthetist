@@ -17,6 +17,7 @@ import android.text.TextUtils;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.widget.Toast;
+import android.view.View;
 
 import java.io.File;
 import java.lang.reflect.Field;
@@ -46,6 +47,7 @@ import static com.xposed.miuianesthetist.XposedHelpersWraper.invokeOriginalMetho
 import static com.xposed.miuianesthetist.XposedHelpersWraper.log;
 import static com.xposed.miuianesthetist.XposedHelpersWraper.setBooleanField;
 import static com.xposed.miuianesthetist.XposedHelpersWraper.setIntField;
+import static com.xposed.miuianesthetist.XposedHelpersWraper.findFirstFieldByExactType;
 
 public class DisableSecurityCheck extends BaseXposedHookLoadPackage {
     private static volatile Resources res;
@@ -205,6 +207,8 @@ public class DisableSecurityCheck extends BaseXposedHookLoadPackage {
         //Disable integrity check when boot in services.jar
         Class sms = findClass("com.miui.server.SecurityManagerService"
                 , classLoader);
+        Class<?> pmsClazz = findClass("com.android.server.pm.PackageManagerService",
+                classLoader);
         findAndHookConstructor(sms, Context.class, boolean.class/*onlyCore*/,
                 new XC_MethodHook() {
                     @Override
@@ -212,6 +216,7 @@ public class DisableSecurityCheck extends BaseXposedHookLoadPackage {
                         //Set the instance of SecurityManagerService class to be onlyCore mode,
                         //then checkSystemSelfProtection() method will do nothing
                         param.args[1] = true;
+                        setIntField(param.thisObject, "val$onlyCore", 1);
                     }
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
@@ -220,16 +225,26 @@ public class DisableSecurityCheck extends BaseXposedHookLoadPackage {
                     }
                 });
 
+//        findAndHookMethod(sms,"checkSysAppCrack", XC_MethodReplacement.returnConstant(false));
+
         //Remove the limit for disabling system apps in services.jar
         findAndHookMethod("com.android.server.pm.PackageManagerServiceInjector"
                 , classLoader, "isAllowedDisable",
                 String.class, int.class, XC_MethodReplacement.returnConstant(true));
+
+        findAndHookMethod("com.android.server.pm.PackageManagerServiceInjector"
+                , classLoader, "isAllowedHideApp",
+                pmsClazz, String.class, boolean.class, int.class, XC_MethodReplacement.returnConstant(true));
 
         //Remove the limit for installing WebViewGoogle manually on MIUI China ROM in services.jar
         findAndHookMethod("com.android.server.pm.PackageManagerServiceInjector",
                 classLoader, "isAllowedInstall",
                 Context.class, File.class, int.class, String.class,
                 XC_MethodReplacement.returnConstant(true));
+
+        findAndHookMethod("com.android.server.pm.PackageManagerServiceInjector",
+                classLoader, "getMiuiDefaultBrowserPkg",
+                XC_MethodReplacement.returnConstant(null));
 
         //Prevent some ultra sticky system apps (MiuiDaemon, FindDevice, etc.) from running
         //after have been disabled in services.jar
@@ -266,7 +281,7 @@ public class DisableSecurityCheck extends BaseXposedHookLoadPackage {
         });
         //Return an intent before it get processed to avoid being hijacked in services.jar
         if (!iib) {
-            Class<?> pmsClazz = findClass("com.android.server.pm.PackageManagerService",
+            pmsClazz = findClass("com.android.server.pm.PackageManagerService",
                     classLoader);
             findAndHookMethod("com.android.server.pm.PackageManagerServiceInjector"
                     , classLoader, "checkMiuiIntent",
@@ -318,7 +333,6 @@ public class DisableSecurityCheck extends BaseXposedHookLoadPackage {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 try {
-                    initRes(param);
                     int R_id_am_detail_net = res.getIdentifier("am_detail_net",
                             "id", "com.miui.securitycenter");
                     View am_detail_net = ((Activity) param.thisObject).findViewById(R_id_am_detail_net);
